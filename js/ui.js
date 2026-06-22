@@ -1,11 +1,14 @@
 import { searchStops, searchTrips, getDepartures } from './trias.js';
 
+// Globaler State für die aktuelle Suche (für "Ohne diese Linie" Re-Search)
+let lastSearchParams = null;
+
 document.addEventListener('DOMContentLoaded', () => {
   initDateTimeDefaults();
-  initAutocomplete('from-input',      'from-ref',      'from-list');
-  initAutocomplete('to-input',        'to-ref',        'to-list');
-  initAutocomplete('via-input',       'via-ref',       'via-list');
-  initAutocomplete('dep-stop-input',  'dep-stop-ref',  'dep-stop-list');
+  initAutocomplete('from-input',     'from-ref',     'from-list');
+  initAutocomplete('to-input',       'to-ref',       'to-list');
+  initAutocomplete('via-input',      'via-ref',       'via-list');
+  initAutocomplete('dep-stop-input', 'dep-stop-ref', 'dep-stop-list');
 
   document.getElementById('btn-search').addEventListener('click', runTripSearch);
   document.getElementById('btn-reset').addEventListener('click', resetSearch);
@@ -63,16 +66,21 @@ function swapStops() {
   [fr.value, tr.value] = [tr.value, fr.value];
 }
 
-function addExcludeLine() {
-  const val = document.getElementById('exclude-line-input').value.trim();
+function addExcludeLine(lineName) {
+  const val = typeof lineName === 'string'
+    ? lineName
+    : document.getElementById('exclude-line-input').value.trim();
   if (!val) return;
+  // Nicht doppelt hinzufügen
+  const existing = [...document.querySelectorAll('#exclude-tags .exclude-tag')].map(t => t.dataset.line);
+  if (existing.includes(val)) return;
   const tag = document.createElement('span');
   tag.className = 'exclude-tag';
   tag.dataset.line = val;
   tag.innerHTML = `${escH(val)} <button title="Entfernen"><span class="material-icons" style="font-size:16px">close</span></button>`;
   tag.querySelector('button').addEventListener('click', () => tag.remove());
   document.getElementById('exclude-tags').appendChild(tag);
-  document.getElementById('exclude-line-input').value = '';
+  if (typeof lineName !== 'string') document.getElementById('exclude-line-input').value = '';
 }
 function getExcludeLines() {
   return [...document.querySelectorAll('#exclude-tags .exclude-tag')].map(t => t.dataset.line);
@@ -98,43 +106,50 @@ function getSegmentTransfers() {
   }));
 }
 
-async function runTripSearch() {
-  const fromRef  = document.getElementById('from-ref').value.trim();
-  const fromName = document.getElementById('from-input').value.trim();
-  const toRef    = document.getElementById('to-ref').value.trim();
-  const toName   = document.getElementById('to-input').value.trim();
-  if (!fromRef || !toRef) {
-    showError('results-container', 'Bitte Start und Ziel aus der Vorschlagsliste wählen.');
-    document.getElementById('result-area').style.display = 'block';
-    return;
-  }
-  const modes = [...document.querySelectorAll('#vm-chips input:checked')].map(c => c.value);
-  const untilTime = document.getElementById('travel-until').value;
-  const params = {
-    fromRef, fromName, toRef, toName,
+function collectSearchParams() {
+  // Fix: Verkehrsmittelfilter – alle angehakten Checkboxen auslesen
+  const modes = [...document.querySelectorAll('#vm-chips input[type=checkbox]:checked')].map(c => c.value);
+  return {
+    fromRef:  document.getElementById('from-ref').value.trim(),
+    fromName: document.getElementById('from-input').value.trim(),
+    toRef:    document.getElementById('to-ref').value.trim(),
+    toName:   document.getElementById('to-input').value.trim(),
     viaRef:   document.getElementById('via-ref').value.trim(),
     viaName:  document.getElementById('via-input').value.trim(),
     date:     document.getElementById('travel-date').value,
     time:     document.getElementById('travel-time').value,
-    untilTime,
+    untilTime:document.getElementById('travel-until').value,
     timeType: document.getElementById('time-type').value,
-    numResults: document.getElementById('num-results').value,
-    algorithm:  document.getElementById('opt-mode').value,
-    maxChanges: document.getElementById('max-changes').value,
+    numResults:      document.getElementById('num-results').value,
+    algorithm:       document.getElementById('opt-mode').value,
+    maxChanges:      document.getElementById('max-changes').value,
     minTransferTime: document.getElementById('min-transfer').value,
     segmentTransfers: getSegmentTransfers(),
-    excludeLines: getExcludeLines(),
+    excludeLines:     getExcludeLines(),
     modes,
     wheelchair: document.getElementById('opt-wheelchair').checked,
     bike:       document.getElementById('opt-bike').checked,
     lowfloor:   document.getElementById('opt-lowfloor').checked
   };
+}
+
+async function runTripSearch(overrideParams) {
+  const params = overrideParams && typeof overrideParams === 'object' && !overrideParams.target
+    ? overrideParams
+    : collectSearchParams();
+
+  if (!params.fromRef || !params.toRef) {
+    showError('results-container', 'Bitte Start und Ziel aus der Vorschlagsliste wählen.');
+    document.getElementById('result-area').style.display = 'block';
+    return;
+  }
+  lastSearchParams = params;
   const cont = document.getElementById('results-container');
   cont.innerHTML = '<div class="loading">Verbindungen werden gesucht …</div>';
   document.getElementById('result-area').style.display = 'block';
   try {
     const trips = await searchTrips(params);
-    renderTrips(trips, cont);
+    renderTrips(trips, cont, params);
   } catch(e) {
     showError('results-container', 'Fehler bei der TRIAS-Anfrage: ' + e.message);
   }
@@ -143,23 +158,24 @@ async function runTripSearch() {
 async function runDepartures() {
   const ref = document.getElementById('dep-stop-ref').value.trim();
   if (!ref) { document.getElementById('dep-result').innerHTML = '<div class="error-box">Bitte Haltestelle aus der Vorschlagsliste wählen.</div>'; return; }
-  const date   = document.getElementById('dep-date').value;
-  const time   = document.getElementById('dep-time').value;
-  const until  = document.getElementById('dep-until').value;
-  const count  = document.getElementById('dep-count').value;
+  const date  = document.getElementById('dep-date').value;
+  const time  = document.getElementById('dep-time').value;
+  const until = document.getElementById('dep-until').value;
+  const count = document.getElementById('dep-count').value;
   const filter = document.querySelector('input[name="dep-mode"]:checked')?.value || 'all';
   document.getElementById('dep-result').innerHTML = '<div class="loading">Lade Abfahrten …</div>';
   try {
-    const deps = await getDepartures(ref, date, time, count, filter);
+    const deps = await getDepartures(ref, date, time, count);
     renderDepartures(deps, filter, until);
   } catch(e) {
     document.getElementById('dep-result').innerHTML = `<div class="error-box">Fehler: ${escH(e.message)}</div>`;
   }
 }
 
-function renderTrips(trips, cont) {
+// ── Renderer: Trips ──────────────────────────────────────────
+function renderTrips(trips, cont, params) {
   if (!trips.length) {
-    cont.innerHTML = '<div class="md-card section-card"><div class="empty-state"><span class="material-icons">search_off</span>Keine Verbindungen gefunden.</div></div>';
+    cont.innerHTML = '<div class="md-card section-card"><div class="empty-state"><span class="material-icons">search_off</span><p>Keine Verbindungen gefunden.</p></div></div>';
     return;
   }
   cont.innerHTML = trips.map((t, i) => {
@@ -167,10 +183,21 @@ function renderTrips(trips, cont) {
     const depFmt = formatISOTime(t.startTime);
     const arrFmt = formatISOTime(t.endTime);
     const changes = t.changes <= 0 ? 'Direktverbindung' : t.changes + ' Umstieg' + (t.changes > 1 ? 'e' : '');
-    const pills  = t.legs.filter(l => l.type === 'timed')
-      .map(l => `<span class="product-pill mode-${modeKey(l.mode)}">${escH(l.lineName || l.mode || '?')}</span>`).join('');
     const delay  = getDelayChip(t.legs[0]);
     const fare   = t.fare ? `<span class="fare-badge">${escH(t.fare)} €</span>` : '';
+
+    const pills = t.legs.filter(l => l.type === 'timed').map(leg => {
+      const mk = modeKey(leg.mode);
+      // Jede Linie bekommt einen "Ohne diese Linie"-Button
+      return `<span class="product-pill mode-${mk}" style="cursor:default">${escH(leg.lineName || '?')}</span>
+              <button class="pill-exclude-btn"
+                title="Ohne Linie ${escH(leg.lineName||'?')} suchen"
+                data-line="${escH(leg.lineName||'')}"
+                onclick="window.__excludeLine('${escH(leg.lineName||'').replace(/'/g,"\\'")}')">
+                <span class="material-icons" style="font-size:14px">block</span>
+              </button>`;
+    }).join('');
+
     const timeline = t.legs.map((leg, li) => {
       if (leg.type === 'walk') return `
         <div class="tl-step">
@@ -179,8 +206,10 @@ function renderTrips(trips, cont) {
           <div class="tl-info"><div class="tl-walk-label">Fußweg · ${formatDuration(leg.duration)}</div></div>
         </div>`;
       const isLast = li === t.legs.length - 1;
-      const inter  = leg.intermediates?.length
-        ? `<details class="inter-stops"><summary>${leg.intermediates.length} Zwischenhalt${leg.intermediates.length > 1 ? 'e' : ''}</summary><ul>${leg.intermediates.map(s => `<li><span>${escH(s.stop)}</span><span class="inter-time">${formatISOTime(s.dep)}</span></li>`).join('')}</ul></details>` : '';
+      const inter = leg.intermediates?.length
+        ? `<details class="inter-stops"><summary>${leg.intermediates.length} Zwischenhalt${leg.intermediates.length > 1 ? 'e' : ''}</summary><ul>
+           ${leg.intermediates.map(s => `<li><span>${escH(s.stop)}</span><span class="inter-time">${formatISOTime(s.dep)}</span></li>`).join('')}
+           </ul></details>` : '';
       return `
         <div class="tl-step">
           <div class="tl-time">${formatISOTime(leg.depPlan)}</div>
@@ -191,18 +220,22 @@ function renderTrips(trips, cont) {
             <div class="tl-vehicle">
               <span class="product-pill mode-${modeKey(leg.mode)}">${escH(leg.lineName || '?')}</span>
               <span class="tl-vehicle-dest">Richtung ${escH(leg.direction || '')}</span>
+              <button class="tl-exclude-btn"
+                title="Ohne diese Linie suchen"
+                onclick="window.__excludeLine('${escH((leg.lineName||'').replace(/'/g,"\\'")}')">
+                <span class="material-icons" style="font-size:14px">block</span> Ohne diese Linie
+              </button>
             </div>
             ${inter}
           </div>
         </div>
-        <div class="tl-step ${isLast ? '' : ''}">
+        <div class="tl-step">
           <div class="tl-time">${formatISOTime(leg.arrPlan)}</div>
           <div class="tl-dot"><div class="dot ${isLast ? 'dot-dest' : ''}"></div>${isLast ? '' : '<div class="tl-line"></div>'}</div>
-          <div class="tl-info">
-            <div class="tl-stop">${escH(leg.toStop)}</div>
-          </div>
+          <div class="tl-info"><div class="tl-stop">${escH(leg.toStop)}</div></div>
         </div>`;
     }).join('');
+
     return `
       <div class="result-card md-card" id="rc-${i}">
         <div class="result-header" onclick="document.getElementById('rc-${i}').classList.toggle('open')">
@@ -219,33 +252,39 @@ function renderTrips(trips, cont) {
         </div>
       </div>`;
   }).join('');
+
+  // Globaler Handler: Linie ausschließen und sofort neu suchen
+  window.__excludeLine = (lineName) => {
+    addExcludeLine(lineName);
+    if (lastSearchParams) {
+      const newParams = {
+        ...lastSearchParams,
+        excludeLines: [...(lastSearchParams.excludeLines || []), lineName]
+          .filter((v, i, a) => a.indexOf(v) === i)
+      };
+      runTripSearch(newParams);
+    }
+  };
 }
 
+// ── Renderer: Abfahrten ───────────────────────────────────────
 function renderDepartures(deps, filter, until) {
   const cont = document.getElementById('dep-result');
   let filtered = filter === 'all' ? deps : deps.filter(d => modeKey(d.mode) === filter);
-  if (until) {
-    filtered = filtered.filter(d => {
-      const t = formatISOTime(d.depPlan || d.depRT);
-      return t <= until;
-    });
-  }
+  if (until) filtered = filtered.filter(d => formatISOTime(d.depPlan || d.depRT) <= until);
   if (!filtered.length) {
-    cont.innerHTML = '<div class="md-card section-card"><div class="empty-state"><span class="material-icons">directions_bus</span>Keine Abfahrten gefunden.</div></div>';
+    cont.innerHTML = '<div class="md-card section-card"><div class="empty-state"><span class="material-icons">directions_bus</span><p>Keine Abfahrten gefunden.</p></div></div>';
     return;
   }
   const rows = filtered.map(d => {
     const plan = formatISOTime(d.depPlan);
     const rt   = d.depRT ? formatISOTime(d.depRT) : plan;
     const late = d.depRT && d.depRT !== d.depPlan;
-    const status = late
-      ? `<span class="dep-late">${rt}</span>`
-      : `<span class="dep-ok">pünktlich</span>`;
     return `<tr>
       <td><span class="product-pill mode-${modeKey(d.mode)}">${escH(d.line)}</span></td>
       <td>${escH(d.direction)}</td>
       <td>${plan}</td>
-      <td>${status}</td>
+      <td>${late ? `<span class="dep-late">${rt}</span>` : '<span class="dep-ok">pünktlich</span>'}</td>
       <td>${escH(d.platform || '–')}</td>
     </tr>`;
   }).join('');
@@ -258,6 +297,7 @@ function renderDepartures(deps, filter, until) {
     </div>`;
 }
 
+// ── Hilfs-Funktionen ───────────────────────────────────────
 function formatISOTime(iso) {
   if (!iso) return '–';
   try { const d = new Date(iso); return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
@@ -283,9 +323,9 @@ function modeKey(mode) {
   if (!mode) return 'bus';
   const m = mode.toLowerCase();
   if (m.includes('tram') || m.includes('city')) return 'tram';
-  if (m.includes('suburban')) return 's';
-  if (m.includes('regional')) return 're';
-  if (m.includes('high') || m.includes('ice')) return 'ice';
+  if (m.includes('suburban'))                   return 's';
+  if (m.includes('regional'))                   return 're';
+  if (m.includes('high') || m.includes('ice'))  return 'ice';
   if (m.includes('intercity') || m.includes('ic')) return 'ic';
   return 'bus';
 }
@@ -299,4 +339,5 @@ function resetSearch() {
   document.getElementById('results-container').innerHTML = '';
   document.getElementById('exclude-tags').innerHTML = '';
   document.getElementById('seg-transfer-list').innerHTML = '';
+  lastSearchParams = null;
 }

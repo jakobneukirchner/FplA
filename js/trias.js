@@ -7,7 +7,6 @@ const TRIAS_ENDPOINT = '/.netlify/functions/trias';
 function nowISO() {
   return new Date().toISOString().slice(0, 19) + 'Z';
 }
-
 function dateTimeISO(dateStr, timeStr) {
   if (!dateStr || !timeStr) return nowISO();
   return `${dateStr}T${timeStr}:00Z`;
@@ -22,11 +21,12 @@ async function triasPost(xml) {
   });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   const text = await r.text();
-  const parser = new DOMParser();
-  return parser.parseFromString(text, 'application/xml');
+  return new DOMParser().parseFromString(text, 'application/xml');
 }
 
-// ── LocationInformationRequest (Haltestellensuche) ─────────
+// ── LocationInformationRequest ─────────────────────────────
+// Fix: nach StopPlace deduplizieren, damit nicht jeder einzelne
+// Steig separat erscheint (z.B. "Braunschweig, Grenzweg" x6)
 export async function searchStops(query) {
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <Trias version="1.2" xmlns="http://www.vdv.de/trias"
@@ -40,7 +40,7 @@ export async function searchStops(query) {
           <LocationName>${escXML(query)}</LocationName>
         </InitialInput>
         <Restrictions>
-          <NumberOfResults>8</NumberOfResults>
+          <NumberOfResults>20</NumberOfResults>
           <Type>stop</Type>
         </Restrictions>
       </LocationInformationRequest>
@@ -48,59 +48,66 @@ export async function searchStops(query) {
   </ServiceRequest>
 </Trias>`;
   const doc = await triasPost(xml);
-  const locs = [...doc.querySelectorAll('Location')];
-  return locs.map(l => ({
-    name: getText(l, 'LocationName Text') || getText(l, 'StopPointName Text'),
-    ref:  getText(l, 'StopPointRef') || getText(l, 'StopPlaceRef')
-  })).filter(s => s.ref);
+
+  // Deduplizierung: Ein StopPlace kann als mehrere StopPoints (Steige) zurück-
+  // kommen. Wir gruppieren nach dem kanonischen Namen und behalten pro Name
+  // den StopPlaceRef (bevorzugt) oder den ersten StopPointRef.
+  const seen  = new Map(); // key: normalisierter Name  →  {name, ref}
+  doc.querySelectorAll('Location').forEach(l => {
+    // Bevorzuge StopPlace-Angaben über einzelne StopPoints
+    const spRef  = getText(l, 'StopPlaceRef');
+    const spName = getText(l, 'StopPlaceName Text');
+    const ptRef  = getText(l, 'StopPointRef');
+    const ptName = getText(l, 'StopPointName Text');
+    const locName = getText(l, 'LocationName Text');
+
+    const name = spName || locName || ptName;
+    const ref  = spRef  || ptRef;
+    if (!ref || !name) return;
+
+    // Normalisierter Key für Deduplizierung
+    const key = name.trim().toLowerCase();
+    if (!seen.has(key)) {
+      seen.set(key, { name: name.trim(), ref });
+    } else {
+      // Falls wir vorher nur einen StopPointRef hatten, tausche gegen StopPlaceRef
+      if (spRef && !seen.get(key).ref.startsWith(spRef.slice(0, 6))) {
+        seen.set(key, { name: name.trim(), ref: spRef });
+      }
+    }
+  });
+
+  return [...seen.values()].slice(0, 8);
 }
 
-// ── TripRequest (Verbindungssuche) ─────────────────────────
+// ── TripRequest ──────────────────────────────────────────────
 export async function searchTrips(params) {
-  /*
-  params: {
-    fromRef, fromName,
-    toRef,   toName,
-    viaRef,  viaName,           // optional
-    date, time, timeType,       // 'dep' | 'arr'
-    numResults,                 // 1-10
-    algorithm,                  // minChanges | fastest | leastWalking
-    maxChanges,                 // 0-9 | '' (unbegrenzt)
-    minTransferTime,            // Minuten global
-    segmentTransfers,           // [{stopRef, minutes}] pro Segment
-    excludeLines,               // ['lineId1','lineId2']
-    modes,                      // ['bus','tram','s','re','ic','ice','ferry','taxi']
-    wheelchair, bike, lowfloor  // boolean
-  }
-  */
   const depArr = params.timeType === 'arr' ? 'Arr' : 'Dep';
   const dt = dateTimeISO(params.date, params.time);
 
   const viaBlock = params.viaRef ? `
-        <Via>
-          <ViaPoint>
-            <LocationRef>
-              <StopPointRef>${escXML(params.viaRef)}</StopPointRef>
-              <LocationName><Text>${escXML(params.viaName||'')}</Text></LocationName>
-            </LocationRef>
-          </ViaPoint>
-        </Via>` : '';
+        <Via><ViaPoint><LocationRef>
+          <StopPointRef>${escXML(params.viaRef)}</StopPointRef>
+          <LocationName><Text>${escXML(params.viaName||'')}</Text></LocationName>
+        </LocationRef></ViaPoint></Via>` : '';
 
+  // Fix: Verkehrsmittelfilter korrekt in TRIAS-Syntax
   const modesBlock = buildModesBlock(params.modes || []);
+
   const excludeBlock = (params.excludeLines||[]).map(l =>
     `<ExcludedLine><PublishedLineName><Text>${escXML(l)}</Text></PublishedLineName></ExcludedLine>`
   ).join('');
 
   const accessBlock = [
     params.wheelchair ? '<WheelchairAccess>true</WheelchairAccess>' : '',
-    params.bike       ? '<BikesAllowed>true</BikesAllowed>' : '',
-    params.lowfloor   ? '<LowFloor>true</LowFloor>' : ''
+    params.bike       ? '<BikesAllowed>true</BikesAllowed>'         : '',
+    params.lowfloor   ? '<LowFloor>true</LowFloor>'                 : ''
   ].filter(Boolean).join('');
 
   const maxChangesBlock = params.maxChanges !== '' && params.maxChanges != null
     ? `<MaxChanges>${parseInt(params.maxChanges)}</MaxChanges>` : '';
 
-  const minTransferBlock = params.minTransferTime > 0
+  const minTransferBlock = parseInt(params.minTransferTime) > 0
     ? `<MinChangeTime>${parseInt(params.minTransferTime)}</MinChangeTime>` : '';
 
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
@@ -116,7 +123,7 @@ export async function searchTrips(params) {
             <StopPointRef>${escXML(params.fromRef)}</StopPointRef>
             <LocationName><Text>${escXML(params.fromName||'')}</Text></LocationName>
           </LocationRef>
-          <${depArr === 'Dep' ? 'DepArrTime' : 'DepArrTime'}>${dt}</${depArr === 'Dep' ? 'DepArrTime' : 'DepArrTime'}>
+          <DepArrTime>${dt}</DepArrTime>
           <ArrivalDeparture>${depArr}</ArrivalDeparture>
         </Origin>
         <Destination>
@@ -146,8 +153,8 @@ export async function searchTrips(params) {
   return parseTrips(doc);
 }
 
-// ── StopEventRequest (Abfahrtsmonitor) ─────────────────────
-export async function getDepartures(stopRef, date, time, count, modeFilter) {
+// ── StopEventRequest ──────────────────────────────────────────
+export async function getDepartures(stopRef, date, time, count) {
   const dt = dateTimeISO(date, time);
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <Trias version="1.2" xmlns="http://www.vdv.de/trias"
@@ -178,21 +185,47 @@ export async function getDepartures(stopRef, date, time, count, modeFilter) {
 
 // ── XML-Helfer ──────────────────────────────────────────────
 function getText(node, selector) {
-  const el = node.querySelector(selector.replace(/ /g, ' > ').replace(/>/g, '>'));
-  return el ? el.textContent.trim() : '';
+  // querySelector versteht keine Leerzeichen als direkte Kind-Selektoren
+  // daher manuell auflösen
+  const parts = selector.split(' ');
+  let cur = node;
+  for (const p of parts) {
+    if (!cur) return '';
+    cur = cur.querySelector(p);
+  }
+  return cur ? cur.textContent.trim() : '';
 }
 function escXML(s) {
-  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  return String(s||'')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+// Fix: Verkehrsmittelfilter – TRIAS erwartet einen einzigen <Modes>-Block
+// mit mehreren <Mode>-Kindelementen, NICHT mehrere <IncludedModes>-Elemente
 function buildModesBlock(modes) {
   const map = {
-    bus: 'bus', tram: 'tram', s: 'suburbanRailway',
-    re: 'regionalRail', ic: 'intercityRail', ice: 'highSpeedRail',
-    ferry: 'water', taxi: 'demandResponsive'
+    bus:   'bus',
+    tram:  'tram',
+    s:     'suburbanRailway',
+    re:    'regionalRail',
+    ic:    'intercityRail',
+    ice:   'highSpeedRail',
+    ferry: 'water',
+    taxi:  'demandResponsive'
   };
   if (!modes.length) return '';
-  return modes.map(m => map[m] ? `<IncludedModes><Mode><PtMode>${map[m]}</PtMode></Mode></IncludedModes>` : '').join('');
+  const modeItems = modes
+    .filter(m => map[m])
+    .map(m => `<Mode><PtMode>${map[m]}</PtMode></Mode>`)
+    .join('');
+  if (!modeItems) return '';
+  return `<Modes><Mode><PtMode>all</PtMode></Mode></Modes>\n          <ExcludedModes>${
+    Object.keys(map)
+      .filter(m => !modes.includes(m) && map[m])
+      .map(m => `<Mode><PtMode>${map[m]}</PtMode></Mode>`)
+      .join('')
+  }</ExcludedModes>`;
 }
 
 // ── Trip-Parser ─────────────────────────────────────────────
@@ -204,25 +237,26 @@ function parseTrips(doc) {
     const legs = [];
     trip.querySelectorAll('TripLeg').forEach(leg => {
       const tl = leg.querySelector('TimedLeg');
-      const cl = leg.querySelector('ContinuousLeg'); // walking
+      const cl = leg.querySelector('ContinuousLeg');
       if (tl) {
         const board  = tl.querySelector('LegBoard');
         const alight = tl.querySelector('LegAlight');
         const inter  = [...tl.querySelectorAll('LegIntermediates')];
-        const svcJrn = tl.querySelector('Service');
+        const svc    = tl.querySelector('Service');
         legs.push({
-          type: 'timed',
-          lineName:   getText(svcJrn||tl, 'PublishedLineName Text'),
-          mode:       getText(svcJrn||tl, 'PtMode'),
-          direction:  getText(svcJrn||tl, 'DestinationText Text'),
-          fromStop:   getText(board, 'StopPointName Text'),
-          fromRef:    getText(board, 'StopPointRef'),
-          depPlan:    getText(board, 'ServiceDeparture TimetabledTime'),
-          depRT:      getText(board, 'ServiceDeparture EstimatedTime'),
-          platform:   getText(board, 'PlannedBay Text'),
-          toStop:     getText(alight, 'StopPointName Text'),
-          arrPlan:    getText(alight, 'ServiceArrival TimetabledTime'),
-          arrRT:      getText(alight, 'ServiceArrival EstimatedTime'),
+          type:      'timed',
+          lineName:  getText(svc||tl, 'PublishedLineName Text'),
+          lineId:    getText(svc||tl, 'LineRef'),
+          mode:      getText(svc||tl, 'PtMode'),
+          direction: getText(svc||tl, 'DestinationText Text'),
+          fromStop:  getText(board,   'StopPointName Text'),
+          fromRef:   getText(board,   'StopPointRef'),
+          depPlan:   getText(board,   'ServiceDeparture TimetabledTime'),
+          depRT:     getText(board,   'ServiceDeparture EstimatedTime'),
+          platform:  getText(board,   'PlannedBay Text'),
+          toStop:    getText(alight,  'StopPointName Text'),
+          arrPlan:   getText(alight,  'ServiceArrival TimetabledTime'),
+          arrRT:     getText(alight,  'ServiceArrival EstimatedTime'),
           intermediates: inter.map(i => ({
             stop: getText(i, 'StopPointName Text'),
             dep:  getText(i, 'ServiceDeparture TimetabledTime')
@@ -230,19 +264,21 @@ function parseTrips(doc) {
         });
       } else if (cl) {
         legs.push({
-          type: 'walk',
+          type:     'walk',
           duration: getText(cl, 'Duration'),
           fromStop: getText(cl.querySelector('LegStart'), 'LocationName Text'),
           toStop:   getText(cl.querySelector('LegEnd'),   'LocationName Text')
         });
       }
     });
-    const duration = getText(trip, 'Duration');
-    const startTime = legs[0]?.depPlan || legs[0]?.depRT || '';
-    const endTime   = legs[legs.length-1]?.arrPlan || '';
-    const changes   = legs.filter(l => l.type === 'timed').length - 1;
-    const fare      = getText(tr, 'FareResult PassengerFare Amount');
-    results.push({ duration, startTime, endTime, changes, legs, fare });
+    results.push({
+      duration:  getText(trip, 'Duration'),
+      startTime: legs[0]?.depPlan || legs[0]?.depRT || '',
+      endTime:   legs[legs.length-1]?.arrPlan || '',
+      changes:   legs.filter(l => l.type === 'timed').length - 1,
+      legs,
+      fare: getText(tr, 'FareResult PassengerFare Amount')
+    });
   });
   return results;
 }
@@ -251,15 +287,15 @@ function parseTrips(doc) {
 function parseStopEvents(doc) {
   const results = [];
   doc.querySelectorAll('StopEventResult').forEach(se => {
-    const ev = se.querySelector('StopEvent');
+    const ev  = se.querySelector('StopEvent');
     if (!ev) return;
     const svc = ev.querySelector('Service');
     results.push({
       line:      getText(svc, 'PublishedLineName Text'),
       direction: getText(svc, 'DestinationText Text'),
-      depPlan:   getText(ev, 'ThisCall CallAtStop ServiceDeparture TimetabledTime'),
-      depRT:     getText(ev, 'ThisCall CallAtStop ServiceDeparture EstimatedTime'),
-      platform:  getText(ev, 'ThisCall CallAtStop PlannedBay Text'),
+      depPlan:   getText(ev,  'ThisCall CallAtStop ServiceDeparture TimetabledTime'),
+      depRT:     getText(ev,  'ThisCall CallAtStop ServiceDeparture EstimatedTime'),
+      platform:  getText(ev,  'ThisCall CallAtStop PlannedBay Text'),
       mode:      getText(svc, 'PtMode')
     });
   });
