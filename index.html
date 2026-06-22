@@ -13,14 +13,14 @@
 
 <header class="app-bar">
   <div class="app-bar-inner">
-    <img src="assets/logo.svg" class="app-logo" alt="Logo" onerror="this.style.display='none'" />
+    <img src="assets/logo.svg" class="app-logo" alt="" onerror="this.style.display='none'" />
     <span class="app-title">FplA</span>
     <nav class="app-nav">
-      <button class="nav-tab active" onclick="setView('connection',this)">
+      <button class="nav-tab active" onclick="showView('conn',this)">
         <span class="material-icons">directions_transit</span> Verbindung
       </button>
-      <button class="nav-tab" onclick="setView('departure',this)">
-        <span class="material-icons">departure_board</span> Abfahrtsmonitor
+      <button class="nav-tab" onclick="showView('dep',this)">
+        <span class="material-icons">departure_board</span> Abfahrt
       </button>
     </nav>
   </div>
@@ -29,18 +29,19 @@
 <main>
 
 <!-- ══ VERBINDUNGSSUCHE ══ -->
-<div id="connection-view">
+<section id="view-conn">
   <div class="md-card section-card">
     <div class="card-header">
       <span class="material-icons card-icon">search</span>
       <h2>Verbindung suchen</h2>
     </div>
 
+    <!-- Von / Nach -->
     <div class="field-row">
       <div class="md-field" style="flex:1">
         <span class="material-icons field-icon">trip_origin</span>
         <input id="from-input" class="md-input" type="text" placeholder=" " autocomplete="off" />
-        <label class="md-label">Von</label>
+        <label class="md-label" for="from-input">Von</label>
         <input type="hidden" id="from-ref" />
         <ul class="ac-list" id="from-list"></ul>
       </div>
@@ -50,31 +51,33 @@
       <div class="md-field" style="flex:1">
         <span class="material-icons field-icon">place</span>
         <input id="to-input" class="md-input" type="text" placeholder=" " autocomplete="off" />
-        <label class="md-label">Nach</label>
+        <label class="md-label" for="to-input">Nach</label>
         <input type="hidden" id="to-ref" />
         <ul class="ac-list" id="to-list"></ul>
       </div>
     </div>
 
+    <!-- Über -->
     <div class="field-row">
       <div class="md-field" style="flex:1">
         <span class="material-icons field-icon">add_location</span>
         <input id="via-input" class="md-input" type="text" placeholder=" " autocomplete="off" />
-        <label class="md-label">Über (optional)</label>
+        <label class="md-label" for="via-input">Über (optional)</label>
         <input type="hidden" id="via-ref" />
         <ul class="ac-list" id="via-list"></ul>
       </div>
     </div>
 
+    <!-- Datum / Zeit -->
     <div class="field-row">
       <div class="md-field">
         <span class="material-icons field-icon">calendar_today</span>
-        <input id="travel-date" class="md-input" type="date" placeholder=" " />
+        <input id="trip-date" class="md-input" type="date" placeholder=" " />
         <label class="md-label">Datum</label>
       </div>
       <div class="md-field">
         <span class="material-icons field-icon">schedule</span>
-        <input id="travel-time" class="md-input" type="time" placeholder=" " />
+        <input id="trip-time" class="md-input" type="time" placeholder=" " />
         <label class="md-label">Uhrzeit</label>
       </div>
       <div class="md-field">
@@ -87,31 +90,33 @@
       </div>
       <div class="md-field">
         <span class="material-icons field-icon">schedule</span>
-        <input id="travel-until" class="md-input" type="time" placeholder=" " />
-        <label class="md-label">Verbindung bis</label>
+        <input id="trip-until" class="md-input" type="time" placeholder=" " />
+        <label class="md-label">Verbindungen bis</label>
       </div>
     </div>
 
     <div class="section-divider"></div>
 
+    <!-- Verkehrsmittel -->
     <div class="filter-section">
       <span class="filter-label">Verkehrsmittel</span>
       <div class="chip-row" id="vm-chips">
-        <label class="filter-chip checked"><input type="checkbox" checked value="bus" />Bus</label>
-        <label class="filter-chip checked"><input type="checkbox" checked value="tram" />Straßenbahn</label>
-        <label class="filter-chip checked"><input type="checkbox" checked value="s" />S-Bahn</label>
-        <label class="filter-chip checked"><input type="checkbox" checked value="re" />RE / RB</label>
-        <label class="filter-chip checked"><input type="checkbox" checked value="ic" />IC / EC</label>
-        <label class="filter-chip checked"><input type="checkbox" checked value="ice" />ICE</label>
+        <label class="filter-chip checked"><input type="checkbox" value="bus"   checked />Bus</label>
+        <label class="filter-chip checked"><input type="checkbox" value="tram"  checked />Straßenbahn</label>
+        <label class="filter-chip checked"><input type="checkbox" value="s"     checked />S-Bahn</label>
+        <label class="filter-chip checked"><input type="checkbox" value="re"    checked />RE / RB</label>
+        <label class="filter-chip checked"><input type="checkbox" value="ic"    checked />IC / EC</label>
+        <label class="filter-chip checked"><input type="checkbox" value="ice"   checked />ICE</label>
         <label class="filter-chip"><input type="checkbox" value="ferry" />Fähre</label>
-        <label class="filter-chip"><input type="checkbox" value="taxi" />Rufbus</label>
+        <label class="filter-chip"><input type="checkbox" value="taxi"  />Rufbus</label>
       </div>
     </div>
 
+    <!-- Routing -->
     <div class="field-row">
       <div class="md-field">
         <span class="material-icons field-icon">tune</span>
-        <select id="opt-mode" class="md-select">
+        <select id="opt-algo" class="md-select">
           <option value="fastest">Schnellste Verbindung</option>
           <option value="minChanges">Wenigste Umstiege</option>
           <option value="leastWalking">Wenig Fußweg</option>
@@ -139,56 +144,40 @@
       </div>
     </div>
 
+    <!-- Anforderungen -->
     <div class="filter-section">
       <span class="filter-label">Anforderungen</span>
       <div class="chip-row">
-        <label class="filter-chip"><input type="checkbox" id="opt-wheelchair" value="wheelchair" />Rollstuhlgerecht</label>
-        <label class="filter-chip"><input type="checkbox" id="opt-bike" value="bike" />Fahrrad</label>
-        <label class="filter-chip"><input type="checkbox" id="opt-lowfloor" value="lowfloor" />Niederflur</label>
+        <label class="filter-chip"><input type="checkbox" id="opt-wheelchair" />Rollstuhlgerecht</label>
+        <label class="filter-chip"><input type="checkbox" id="opt-bike" />Fahrrad</label>
+        <label class="filter-chip"><input type="checkbox" id="opt-lowfloor" />Niederflur</label>
       </div>
     </div>
 
+    <!-- Mindest-Umsteigezeit -->
     <div class="filter-section">
-      <span class="filter-label">Mindest-Umsteigezeit <span id="mt-val" class="filter-label-val">3 min</span></span>
+      <span class="filter-label">Mindest-Umsteigezeit <span id="mt-val" class="filter-val">3 min</span></span>
       <input type="range" id="min-transfer" class="md-slider" min="0" max="30" value="3" step="1"
         oninput="document.getElementById('mt-val').textContent=this.value+' min'" />
     </div>
 
-    <div class="filter-section">
-      <span class="filter-label">Umsteigezeit pro Haltestelle</span>
-      <div class="field-row">
-        <div class="md-field" style="flex:2">
-          <span class="material-icons field-icon">place</span>
-          <input id="seg-stop-input" class="md-input" type="text" placeholder=" " />
-          <label class="md-label">Haltestelle</label>
-        </div>
-        <div class="md-field" style="flex:0 0 110px">
-          <span class="material-icons field-icon">timer</span>
-          <input id="seg-min-input" class="md-input" type="number" min="1" max="60" placeholder=" " />
-          <label class="md-label">Minuten</label>
-        </div>
-        <button class="md-btn md-btn-outlined" id="btn-add-segment">
-          <span class="material-icons">add</span> Hinzufügen
-        </button>
-      </div>
-      <div id="seg-transfer-list"></div>
-    </div>
-
+    <!-- Linien ausschließen -->
     <div class="filter-section">
       <span class="filter-label">Linien ausschließen</span>
       <div class="field-row">
         <div class="md-field" style="flex:1">
-          <span class="material-icons field-icon">remove_circle_outline</span>
-          <input id="exclude-line-input" class="md-input" type="text" placeholder=" " />
-          <label class="md-label">Linienbezeichnung (z. B. ICE 641, 17)</label>
+          <span class="material-icons field-icon">block</span>
+          <input id="excl-input" class="md-input" type="text" placeholder=" " />
+          <label class="md-label">Linie (z. B. ICE 641, 17)</label>
         </div>
-        <button class="md-btn md-btn-outlined" id="btn-add-exclude">
-          <span class="material-icons">block</span> Ausschließen
+        <button class="md-btn md-btn-outlined" id="btn-add-excl">
+          <span class="material-icons">add</span> Ausschließen
         </button>
       </div>
-      <div id="exclude-tags"></div>
+      <div id="excl-tags"></div>
     </div>
 
+    <!-- Aktionsleiste -->
     <div class="btn-row">
       <button class="md-btn md-btn-filled" id="btn-search">
         <span class="material-icons">search</span> Suchen
@@ -196,18 +185,19 @@
       <button class="md-btn md-btn-tonal" id="btn-reset">
         <span class="material-icons">restart_alt</span> Zurücksetzen
       </button>
+      <div style="flex:1"></div>
       <button class="md-btn md-btn-outlined" id="btn-share">
         <span class="material-icons">share</span> Teilen
       </button>
       <button class="md-btn md-btn-outlined" id="btn-print">
-        <span class="material-icons">print</span> Drucken / PDF
+        <span class="material-icons">print</span> PDF
       </button>
     </div>
   </div>
 
   <!-- Sortierleiste -->
   <div id="sort-bar" style="display:none">
-    <span class="sort-label">Sortierung:</span>
+    <span class="sort-label">Sortierung</span>
     <button class="sort-chip active" data-sort="default">Standard</button>
     <button class="sort-chip" data-sort="dep">Nach Abfahrt</button>
     <button class="sort-chip" data-sort="arr">Nach Ankunft</button>
@@ -215,26 +205,28 @@
   </div>
 
   <div id="result-area" style="display:none">
-    <div id="results-container"></div>
+    <div id="trip-results"></div>
   </div>
-</div>
+</section>
 
 <!-- ══ ABFAHRTSMONITOR ══ -->
-<div id="departure-view" style="display:none">
+<section id="view-dep" style="display:none">
   <div class="md-card section-card">
     <div class="card-header">
       <span class="material-icons card-icon">departure_board</span>
       <h2>Abfahrtsmonitor</h2>
     </div>
+
     <div class="field-row">
       <div class="md-field" style="flex:2">
         <span class="material-icons field-icon">place</span>
-        <input id="dep-stop-input" class="md-input" type="text" placeholder=" " autocomplete="off" />
-        <label class="md-label">Haltestelle</label>
-        <input type="hidden" id="dep-stop-ref" />
-        <ul class="ac-list" id="dep-stop-list"></ul>
+        <input id="dep-input" class="md-input" type="text" placeholder=" " autocomplete="off" />
+        <label class="md-label" for="dep-input">Haltestelle</label>
+        <input type="hidden" id="dep-ref" />
+        <ul class="ac-list" id="dep-list"></ul>
       </div>
     </div>
+
     <div class="field-row">
       <div class="md-field">
         <span class="material-icons field-icon">calendar_today</span>
@@ -244,64 +236,55 @@
       <div class="md-field">
         <span class="material-icons field-icon">schedule</span>
         <input id="dep-time" class="md-input" type="time" placeholder=" " />
-        <label class="md-label">Ab Uhrzeit</label>
+        <label class="md-label">Ab</label>
       </div>
       <div class="md-field">
         <span class="material-icons field-icon">schedule</span>
         <input id="dep-until" class="md-input" type="time" placeholder=" " />
-        <label class="md-label">Bis Uhrzeit</label>
+        <label class="md-label">Bis</label>
       </div>
       <div class="md-field">
         <span class="material-icons field-icon">format_list_numbered</span>
         <select id="dep-count" class="md-select">
           <option>5</option><option selected>10</option><option>20</option><option>50</option>
         </select>
-        <label class="md-label md-label-select">Max. Einträge</label>
+        <label class="md-label md-label-select">Max.</label>
       </div>
     </div>
+
+    <!-- Verkehrsmittelfilter Abfahrt -->
     <div class="filter-section">
-      <span class="filter-label">Verkehrsmittel-Filter</span>
-      <div class="chip-row" id="dep-vm-chips">
+      <span class="filter-label">Filter</span>
+      <div class="chip-row">
         <label class="filter-chip checked"><input type="radio" name="dep-mode" value="all" checked />Alle</label>
-        <label class="filter-chip"><input type="radio" name="dep-mode" value="bus" />Bus</label>
+        <label class="filter-chip"><input type="radio" name="dep-mode" value="bus"  />Bus</label>
         <label class="filter-chip"><input type="radio" name="dep-mode" value="tram" />Straßenbahn</label>
-        <label class="filter-chip"><input type="radio" name="dep-mode" value="s" />S-Bahn</label>
-        <label class="filter-chip"><input type="radio" name="dep-mode" value="re" />RE / RB</label>
+        <label class="filter-chip"><input type="radio" name="dep-mode" value="s"    />S-Bahn</label>
+        <label class="filter-chip"><input type="radio" name="dep-mode" value="re"   />RE / RB</label>
       </div>
     </div>
+
     <div class="btn-row">
       <button class="md-btn md-btn-filled" id="btn-dep">
         <span class="material-icons">departure_board</span> Abfahrten anzeigen
       </button>
     </div>
   </div>
-  <div id="dep-result"></div>
-</div>
+
+  <div id="dep-results"></div>
+</section>
 
 </main>
-<footer class="app-footer">FplA &nbsp;&bull;&nbsp; Fahrplandaten: Connect GmbH / HannIT &nbsp;&bull;&nbsp; Alle Angaben ohne Gewähr</footer>
+
+<footer class="app-footer">FplA &nbsp;·&nbsp; Fahrplandaten: Connect GmbH / HannIT &nbsp;·&nbsp; Alle Angaben ohne Gewähr</footer>
 
 <script type="module" src="js/ui.js"></script>
 <script>
-function setView(view,btn){
-  ['connection','departure'].forEach(v=>document.getElementById(v+'-view').style.display=v===view?'':'none');
-  document.querySelectorAll('.nav-tab').forEach(b=>b.classList.remove('active'));
+function showView(id, btn) {
+  ['conn','dep'].forEach(v => document.getElementById('view-'+v).style.display = v===id?'':'none');
+  document.querySelectorAll('.nav-tab').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
 }
-document.addEventListener('DOMContentLoaded',()=>{
-  document.querySelectorAll('.chip-row').forEach(row=>{
-    row.querySelectorAll('input[type=radio]').forEach(r=>{
-      r.addEventListener('change',()=>{
-        row.querySelectorAll('label').forEach(l=>l.classList.remove('checked'));
-        r.closest('label').classList.add('checked');
-      });
-    });
-    row.querySelectorAll('input[type=checkbox]').forEach(cb=>{
-      cb.addEventListener('change',()=>cb.closest('label').classList.toggle('checked',cb.checked));
-    });
-  });
-});
 </script>
-
 </body>
 </html>
