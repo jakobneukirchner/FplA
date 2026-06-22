@@ -1,0 +1,15 @@
+/* ════════════════════════════════════════════════════════
+   branding.css  –  Custom-Branding für FplA
+   Passe diese Datei an, um Farben und Logo anzupassen.
+   ════════════════════════════════════════════════════════ */
+
+:root {
+  /* Hauptfarbe (Header, Buttons, aktive Elemente) */
+  /* --primary: #003d82; */
+
+  /* Akzentfarbe (Zielmarkierung, Highlight) */
+  /* --accent: #f39200; */
+
+  /* Logo ein-/ausblenden: block oder none */
+  /* --logo-display: block; */
+}

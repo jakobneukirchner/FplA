@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FplA – Fahrplanauskunft</title>
+  <link rel="icon" href="assets/favicon.ico" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <img src="assets/logo.svg" alt="Logo" onerror="this.style.display='none'" />
+    &#x1F686; <span>FplA</span>
+  </div>
+  <nav>
+    <button class="active" onclick="setView('connection',this)">Verbindung</button>
+    <button onclick="setView('departure',this)">Abfahrtsmonitor</button>
+  </nav>
+</header>
+
+<main>
+
+<!-- ══ VERBINDUNGSSUCHE ══ -->
+<div id="connection-view">
+  <div class="search-card">
+    <h2>&#x1F50D; Verbindung suchen</h2>
+
+    <!-- Start / Ziel -->
+    <div class="search-grid">
+      <div class="field">
+        <label>Von</label>
+        <input id="from-input" type="text" placeholder="Abfahrtshaltestelle" autocomplete="off" />
+        <input type="hidden" id="from-ref" />
+        <ul class="ac-list" id="from-list"></ul>
+      </div>
+      <button class="swap-btn" id="btn-swap" title="Tauschen">&#x21C5;</button>
+      <div class="field">
+        <label>Nach</label>
+        <input id="to-input" type="text" placeholder="Zielhaltestelle" autocomplete="off" />
+        <input type="hidden" id="to-ref" />
+        <ul class="ac-list" id="to-list"></ul>
+      </div>
+    </div>
+
+    <!-- Über -->
+    <div class="options-row">
+      <div class="field" style="flex:2">
+        <label>Über (optional)</label>
+        <input id="via-input" type="text" placeholder="Zwischenhalt" autocomplete="off" />
+        <input type="hidden" id="via-ref" />
+        <ul class="ac-list" id="via-list"></ul>
+      </div>
+    </div>
+
+    <!-- Datum / Zeit / Art -->
+    <div class="options-row">
+      <div class="field">
+        <label>Datum</label>
+        <input id="travel-date" type="date" />
+      </div>
+      <div class="field">
+        <label>Uhrzeit</label>
+        <input id="travel-time" type="time" />
+      </div>
+      <div class="field">
+        <label>Zeitart</label>
+        <select id="time-type">
+          <option value="dep">Abfahrt</option>
+          <option value="arr">Ankunft</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Ergebnisse</label>
+        <select id="num-results">
+          <option>3</option><option selected>5</option><option>10</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Algorithmus & Umstiege -->
+    <div class="options-row">
+      <div class="field">
+        <label>Optimieren nach</label>
+        <select id="opt-mode">
+          <option value="fastest">Schnellste Verbindung</option>
+          <option value="minChanges">Wenigste Umstiege</option>
+          <option value="leastWalking">Wenig Fußweg</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Max. Umstiege</label>
+        <select id="max-changes">
+          <option value="0">0</option>
+          <option value="1">1</option>
+          <option value="2" selected>2</option>
+          <option value="3">3</option>
+          <option value="4">4</option>
+          <option value="">Unbegrenzt</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Verkehrsmittel -->
+    <div class="opt-section">
+      <h4>Verkehrsmittel</h4>
+      <div class="toggle-group" id="vm-toggles">
+        <label><input type="checkbox" checked value="bus" />&#x1F68C; Bus</label>
+        <label><input type="checkbox" checked value="tram" />&#x1F68A; Straßenbahn</label>
+        <label><input type="checkbox" checked value="s" />&#x1F686; S-Bahn</label>
+        <label><input type="checkbox" checked value="re" />&#x1F688; RE/RB</label>
+        <label><input type="checkbox" checked value="ic" />&#x1F684; IC/EC</label>
+        <label><input type="checkbox" checked value="ice" />&#x26A1; ICE</label>
+        <label><input type="checkbox" value="ferry" />&#x26F4; Fähre</label>
+        <label><input type="checkbox" value="taxi" />&#x1F696; Rufbus/Taxi</label>
+      </div>
+    </div>
+
+    <!-- Barrierefreiheit -->
+    <div class="opt-section">
+      <h4>Komfort &amp; Barrierefreiheit</h4>
+      <div class="toggle-group">
+        <label><input type="checkbox" id="opt-wheelchair" value="wheelchair" />&#x267F; Rollstuhl</label>
+        <label><input type="checkbox" id="opt-bike" value="bike" />&#x1F6B2; Fahrrad</label>
+        <label><input type="checkbox" id="opt-lowfloor" value="lowfloor" />Niederflur</label>
+      </div>
+    </div>
+
+    <!-- Min. Umsteigezeit global -->
+    <div class="opt-section">
+      <h4>Globale Mindest-Umsteigezeit</h4>
+      <div class="range-row">
+        <input type="range" id="min-transfer" min="0" max="30" value="3" step="1"
+          oninput="document.getElementById('mt-val').textContent=this.value+' min'" />
+        <span class="range-val" id="mt-val">3 min</span>
+      </div>
+    </div>
+
+    <!-- Individuelle Umsteigezeiten pro Segment -->
+    <div class="opt-section">
+      <h4>Umsteigezeit pro Haltestelle (individuell)</h4>
+      <div class="seg-input-row">
+        <div class="field" style="flex:2">
+          <label>Haltestelle</label>
+          <input id="seg-stop-input" type="text" placeholder="z.B. Hannover Hbf" />
+        </div>
+        <div class="field">
+          <label>Minuten</label>
+          <input id="seg-min-input" type="number" min="1" max="60" placeholder="5" />
+        </div>
+        <button class="btn btn-secondary btn-sm" id="btn-add-segment" style="margin-bottom:2px">+ Hinzufügen</button>
+      </div>
+      <div id="seg-transfer-list"></div>
+    </div>
+
+    <!-- Linien ausschließen -->
+    <div class="opt-section">
+      <h4>Linien ausschließen</h4>
+      <div class="exclude-input-row">
+        <input id="exclude-line-input" type="text" placeholder="Linienbezeichnung, z.B. ICE 641 oder 17" style="flex:1" />
+        <button class="btn btn-secondary btn-sm" id="btn-add-exclude">+ Ausschließen</button>
+      </div>
+      <div id="exclude-tags"></div>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn btn-primary" id="btn-search">&#x1F50D; Suchen</button>
+      <button class="btn btn-secondary" id="btn-reset">&#x21BA; Zurücksetzen</button>
+    </div>
+  </div>
+
+  <!-- Ergebnisse -->
+  <div id="result-area" style="display:none;">
+    <div id="results-container"></div>
+  </div>
+</div>
+
+<!-- ══ ABFAHRTSMONITOR ══ -->
+<div id="departure-view" style="display:none;">
+  <div class="search-card">
+    <h2>&#x1F4CB; Abfahrtsmonitor</h2>
+    <div class="search-grid">
+      <div class="field full">
+        <label>Haltestelle</label>
+        <input id="dep-stop-input" type="text" placeholder="Haltestelle eingeben" autocomplete="off" />
+        <input type="hidden" id="dep-stop-ref" />
+        <ul class="ac-list" id="dep-stop-list"></ul>
+      </div>
+    </div>
+    <div class="options-row">
+      <div class="field">
+        <label>Datum</label>
+        <input id="dep-date" type="date" />
+      </div>
+      <div class="field">
+        <label>Uhrzeit</label>
+        <input id="dep-time" type="time" />
+      </div>
+      <div class="field">
+        <label>Einträge</label>
+        <select id="dep-count">
+          <option>5</option><option selected>10</option><option>20</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Filter</label>
+        <select id="dep-filter">
+          <option value="all">Alle</option>
+          <option value="bus">Nur Bus</option>
+          <option value="tram">Nur Tram</option>
+          <option value="s">Nur S-Bahn</option>
+          <option value="re">Nur RE/RB</option>
+        </select>
+      </div>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-primary" id="btn-dep">Abfahrten anzeigen</button>
+    </div>
+  </div>
+  <div id="dep-result"></div>
+</div>
+
+</main>
+<div class="footer">FplA &bull; Fahrplandaten: Connect GmbH / HannIT &bull; Alle Angaben ohne Gewähr</div>
+
+<script type="module" src="js/ui.js"></script>
+<script>
+function setView(view, btn) {
+  ['connection','departure'].forEach(v => {
+    document.getElementById(v+'-view').style.display = v===view ? '' : 'none';
+  });
+  document.querySelectorAll('header nav button').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+}
+</script>
+
+</body>
+</html>
